@@ -129,6 +129,26 @@ describe('Evaluator', () => {
       const answer = evaluateAll(question, context);
       expect(answer).toEqual([1, 2, 49, 800, 555]);
     });
+    test('It should allow to define and run functions', () => {
+      const script = `
+      function splitString(str) {
+        return str.split(/\\r?\\n/);
+      }
+      const input = 'hola\\nadios';
+      const output = splitString(input);
+      output;
+      `;
+
+      const result = evaluateAll(script);
+      expect(result[3]).toEqual(['hola', 'adios']);
+    });
+    test('It should be able to create new instances', () => {
+      const script = `
+      new Date('2020-01-01');
+      `;
+      const result = evaluateAll(script, { Date });
+      expect(result[0]).toEqual(new Date('2020-01-01'));
+    });
   });
   describe('Evaluate', () => {
     test('Should resolve parameters', () => {
@@ -297,9 +317,27 @@ describe('Evaluator', () => {
       const answer = evaluate(question, context);
       expect(answer).toEqual(true);
     });
+    test('Should eval || (logical or) when left is true', () => {
+      const context = { a: 1, b: 2 };
+      const question = 'true || false';
+      const answer = evaluate(question, context);
+      expect(answer).toEqual(true);
+    });
+    test('Should eval || as default fallback', () => {
+      const context = { a: undefined, b: 'something' };
+      const input = 'a || b';
+      const answer = evaluate(input, context);
+      expect(answer).toEqual('something');
+    });
     test('Should eval && (logical and)', () => {
       const context = { a: 1, b: 2 };
       const question = 'true && false';
+      const answer = evaluate(question, context);
+      expect(answer).toEqual(false);
+    });
+    test('Should eval && (logical and) when left is false', () => {
+      const context = { a: 1, b: 2 };
+      const question = 'false && true';
       const answer = evaluate(question, context);
       expect(answer).toEqual(false);
     });
