@@ -56,7 +56,7 @@ function walkBinary(node, context) {
     return false;
   }
   if (node.operator === '||' && left) {
-    return true;
+    return left;
   }
   const right = walk(node.right, context);
   if (right === FAIL_RESULT) {
@@ -126,14 +126,39 @@ function walkThis(node, context) {
   return undefined;
 }
 
+function walkFunctionExecution(node, context, args) {
+  const newContext = {};
+  const keys = Object.keys(context);
+  keys.forEach((element) => {
+    newContext[element] = context[element];
+  });
+  node.params.forEach((key, index) => {
+    if (key.type === 'Identifier') {
+      newContext[key.name] = args ? args[index] : null;
+    }
+  });
+  const bodies = node.body.body;
+  let value;
+  for (let i = 0, l = bodies.length; i < l; i += 1) {
+    value = walk(bodies[i], newContext);
+    if (value === FAIL_RESULT) {
+      return FAIL_RESULT;
+    }
+  }
+  return value;
+}
+
 function walkCall(node, context) {
   const callee = walk(node.callee, context);
-  if (callee === FAIL_RESULT || typeof callee !== 'function') {
+  if (
+    !(
+      typeof callee === 'function' ||
+      (callee && callee.type === 'FunctionExpression')
+    )
+  ) {
     return FAIL_RESULT;
   }
-  let ctx = node.callee.object
-    ? walk(node.callee.object, context)
-    : FAIL_RESULT;
+  let ctx = node.callee.object ? walk(node.callee.object, context) : callee;
   if (ctx === FAIL_RESULT) {
     ctx = null;
   }
@@ -145,7 +170,10 @@ function walkCall(node, context) {
     }
     args.push(x);
   }
-  return callee.apply(ctx, args);
+  if (typeof callee === 'function') {
+    return callee.apply(ctx, args);
+  }
+  return walkFunctionExecution(callee, context, args);
 }
 
 function walkMember(node, context) {
@@ -189,15 +217,15 @@ function walkReturn(node, context) {
   return walk(node.argument, context);
 }
 
-function walkFunction(node, context) {
+function walkFunction(node, context, args) {
   const newContext = {};
   const keys = Object.keys(context);
   keys.forEach((element) => {
     newContext[element] = context[element];
   });
-  node.params.forEach((key) => {
+  node.params.forEach((key, index) => {
     if (key.type === 'Identifier') {
-      newContext[key.name] = null;
+      newContext[key.name] = args ? args[index] : null;
     }
   });
   const bodies = node.body.body;
@@ -207,11 +235,12 @@ function walkFunction(node, context) {
     }
   }
   const vals = keys.map((key) => context[key]);
+  const unparsed = unparse(node);
   // eslint-disable-next-line
-    return Function(keys.join(', '), 'return ' + unparse(node)).apply(
-      null,
-      vals
-    );
+  return Function(keys.join(', '), `return ${unparsed}`).apply(
+    null,
+    vals
+  );
 }
 
 function walkTemplateLiteral(node, context) {
@@ -233,7 +262,7 @@ function walkTaggedTemplate(node, context) {
   const strings = quasi.quasis.map((q) => walk(q, context));
   const values = quasi.expressions.map((e) => walk(e, context));
   // eslint-disable-next-line
-    return tag.apply(null, [strings].concat(values));
+  return tag.apply(null, [strings].concat(values));
 }
 
 function walkSetIdentifier(node, context, value) {
@@ -325,22 +354,45 @@ function walkAssignmentExpression(node, context) {
       return leftValue;
     case '|=':
       // eslint-disable-next-line
-        leftValue |= value;
+      leftValue |= value;
       walkSet(node.left, context, leftValue);
       return leftValue;
     case '&=':
       // eslint-disable-next-line
-        leftValue &= value;
+      leftValue &= value;
       walkSet(node.left, context, leftValue);
       return leftValue;
     case '^=':
       // eslint-disable-next-line
-        leftValue ^= value;
+      leftValue ^= value;
       walkSet(node.left, context, leftValue);
       return leftValue;
     default:
       return FAIL_RESULT;
   }
+}
+
+function walkNew(node, context) {
+  const Clazz = walk(node.callee, context);
+  const args = node.arguments.map((arg) => walk(arg, context));
+  const result = new Clazz(...args);
+  return result;
+}
+
+function walkFunctionDeclaration(node, context) {
+  const fn = { ...node };
+  fn.type = 'FunctionExpression';
+  context[node.id.name] = fn;
+}
+
+function walkVariableDeclaration(node, context) {
+  for (let i = 0; i < node.declarations.length; i += 1) {
+    walk(node.declarations[i], context);
+  }
+}
+
+function walkVariableDeclarator(node, context) {
+  context[node.id.name] = walk(node.init, context);
 }
 
 function walkBlock(node, context) {
@@ -367,10 +419,10 @@ function walkArrowFunction(node, context) {
   });
   const vals = keys.map((key) => context[key]);
   // eslint-disable-next-line
-    return Function(keys.join(', '), 'return ' + unparse(node)).apply(
-      null,
-      vals
-    );
+  return Function(keys.join(', '), 'return ' + unparse(node)).apply(
+    null,
+    vals
+  );
 }
 
 walk = (node, context) => {
@@ -416,6 +468,14 @@ walk = (node, context) => {
       return walkConditional(node, context);
     case 'BlockStatement':
       return walkBlock(node, context);
+    case 'FunctionDeclaration':
+      return walkFunctionDeclaration(node, context);
+    case 'NewExpression':
+      return walkNew(node, context);
+    case 'VariableDeclaration':
+      return walkVariableDeclaration(node, context);
+    case 'VariableDeclarator':
+      return walkVariableDeclarator(node, context);
     case 'ArrowFunctionExpression':
       return walkArrowFunction(node, context);
     default:
@@ -452,6 +512,7 @@ module.exports = {
   walkBinary,
   walkIdentifier,
   walkThis,
+  walkFunctionExecution,
   walkCall,
   walkMember,
   walkConditional,
@@ -466,7 +527,12 @@ module.exports = {
   walkSet,
   walkUpdateExpression,
   walkAssignmentExpression,
+  walkNew,
+  walkFunctionDeclaration,
+  walkVariableDeclaration,
+  walkVariableDeclarator,
   walkBlock,
+  walkArrowFunction,
   walk,
   evaluate,
   evaluateAll,
