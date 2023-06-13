@@ -1,6 +1,5 @@
-const { evaluate, evaluateAll } = require('./evaluator');
+const evaluator = require('./evaluator');
 
 module.exports = {
-  evaluate,
-  evaluateAll,
+  ...evaluator,
 };
