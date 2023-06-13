@@ -164,11 +164,19 @@ function walkCall(node, context) {
   }
   const args = [];
   for (let i = 0, l = node.arguments.length; i < l; i += 1) {
-    const x = walk(node.arguments[i], context);
-    if (x === FAIL_RESULT) {
-      return FAIL_RESULT;
+    if (node.arguments[i].type === 'SpreadElement') {
+      const x = walk(node.arguments[i].argument, context);
+      if (x === FAIL_RESULT) {
+        return FAIL_RESULT;
+      }
+      args.push(...x);
+    } else {
+      const x = walk(node.arguments[i], context);
+      if (x === FAIL_RESULT) {
+        return FAIL_RESULT;
+      }
+      args.push(x);
     }
-    args.push(x);
   }
   if (typeof callee === 'function') {
     return callee.apply(ctx, args);
